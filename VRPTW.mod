@@ -46,7 +46,8 @@ execute INITIALIZE {
 // Decision variables
 dvar boolean x[Vehicles][CustomersAndDepots][CustomersAndDepots]; // 1 if a vehicle drives directly from vertex i to vertex j
 dvar int s[Vehicles][CustomersAndDepots]; // the time a vehicle starts to service a customer
-
+dexpr float maxTimeSpentBetweenTwoCustomers = max(a,b in CustomersAndDepots)(UBTW[a] + Time[a][b] - LBTW[b]);
+     
 /*****************************************************************************
  *
  * MODEL
@@ -58,44 +59,44 @@ subject to {
 	forall(i in CustomersAndDepots, k in Vehicles)
 	  x[k][i][i] == 0;
 
-   // Each customer is visited exactly once
-   forall (i in Customers)
-    sum(k in Vehicles, j in CustomersAndDepots) x[k][i][j] == 1;
+   	// Each customer is visited exactly once
+	forall (i in Customers)
+		sum(k in Vehicles, j in CustomersAndDepots) x[k][i][j] == 1;
 
-   // A vehicle can only be loaded up to it's capacity
-   forall(k in Vehicles)
+   	// A vehicle can only be loaded up to it's capacity
+	forall(k in Vehicles)
      	sum(i in Customers, j in CustomersAndDepots)(Demand[i] * x[k][i][j]) <= Capacity;
 
-   // Each vehicle must leave the depot 0
-   forall(k in Vehicles)
+   	// Each vehicle must leave the depot 0
+	forall(k in Vehicles)
      	sum (j in CustomersAndDepots)x[k][0][j] == 1;
 
-   // After a vehicle arrives at a customer it has to leave for another destination
-   forall(h in Customers, k in Vehicles)
+   	// After a vehicle arrives at a customer it has to leave for another destination
+   	forall(h in Customers, k in Vehicles)
      	sum(i in CustomersAndDepots)x[k][i][h] - sum(j in CustomersAndDepots)x[k][h][j] == 0;
 
-   // All vehicles must arrive at the depot n + 1
-   forall(k in Vehicles)
+   	// All vehicles must arrive at the depot n + 1
+   	forall(k in Vehicles)
      	sum (i in CustomersAndDepots) x[k][i][CustomersNumber+1] == 1;
 
-   // The time windows are observed
-   forall(i in CustomersAndDepots, k in Vehicles)
+   	// The time windows are observed
+   	forall(i in CustomersAndDepots, k in Vehicles)
      	LBTW[i] <= s[k][i] <= UBTW[i];
 
-   // From depot departs a number of vehicles equal to or smaller than v
-   forall(k in Vehicles, j in CustomersAndDepots)
+   	// From depot departs a number of vehicles equal to or smaller than v
+   	forall(k in Vehicles, j in CustomersAndDepots)
      	sum (k in Vehicles, j in CustomersAndDepots) x[k][0][j] <= v;
 
-   // Vehicle departure time from a customer and its immediate successor
-   forall(i,j in CustomersAndDepots, k in Vehicles)
-     	s[k][i] + Time[i][j] - 1000*(1 - x[k][i][j]) <= s[k][j];
+   	// Vehicle departure time from a customer and its immediate successor
+   	forall(i,j in CustomersAndDepots, k in Vehicles)
+     	s[k][i] + Time[i][j] - maxTimeSpentBetweenTwoCustomers*(1 - x[k][i][j]) <= s[k][j];
 };
 
 execute DISPLAY {
     writeln("Solutions: ");
-    for(var k in Vehicles)
-      for(var i in CustomersAndDepots)
-    	  for (var j in CustomersAndDepots)
-          if(x[k][i][j] == 1)
-            writeln("vehicle ", k, " from ", i, " to ", j);
+	for(var k in Vehicles)
+		for(var i in CustomersAndDepots)
+			for (var j in CustomersAndDepots)
+				if(x[k][i][j] == 1)
+					writeln("vehicle ", k, " from ", i, " to ", j);
 }

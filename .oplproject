@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="ASCII"?><project>
 	<version>1.0</version>
 	<configs>
-		<config default="true" name="1" category="opl">
+		<config default="true" name="Default" category="opl">
 			<ref name="VRPTW.mod" type="model">
 			</ref>
 			<ref name="VRPTW.dat" type="data">
