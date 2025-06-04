@@ -83,9 +83,8 @@ subject to {
    	forall(i in CustomersAndDepots, k in Vehicles)
      	LBTW[i] <= s[k][i] <= UBTW[i];
 
-   	// From depot departs a number of vehicles equal to or smaller than v
-   	forall(k in Vehicles, j in CustomersAndDepots)
-     	sum (k in Vehicles, j in CustomersAndDepots) x[k][0][j] <= v;
+       // Limit the total number of vehicles leaving the depot
+       sum(k in Vehicles, j in CustomersAndDepots) x[k][0][j] <= v;
 
    	// Vehicle departure time from a customer and its immediate successor
    	forall(i,j in CustomersAndDepots, k in Vehicles)
