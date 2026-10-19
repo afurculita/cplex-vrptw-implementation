@@ -138,16 +138,70 @@ models and the Python port unless stated otherwise).
    Community Edition on PyPI ships no CP Optimizer engine, so this model is
    provided as a starting point and flagged as untested in its header.
 
-## 5. Suggestions not applied
+## 5. Branch-and-price and branch-and-cut
 
-* **Branch-and-price.** Solomon's 100-customer instances need a
-  set-partitioning master problem with an elementary shortest path pricing
-  problem with resource constraints (ESPPRC). This is a project of its own
-  (labelling algorithm, column management, branching rules) and is out of
-  scope for a compact-model repository; the two-index model solves
-  instances of roughly 15–25 customers and the CP model gives good
-  heuristic solutions beyond that.
-* **Stronger cuts** (two-path cuts, k-path cuts, subtour-elimination cuts
-  separated in a callback) require a callback-driven branch-and-cut, which
-  OPL does not expose; they could be added in the docplex port with CPLEX's
-  generic callbacks.
+Both were added in Python on top of docplex / the ``cplex`` API; OPL cannot
+express callbacks or column generation.
+
+### 5.1 Branch-and-cut (`vrptw/cuts.py`, `solve(..., cuts=True)`)
+
+A CPLEX **generic callback** in the *relaxation* context reads the LP
+point, aggregates it into arc flows (summing over vehicles for the
+three-index model) and separates two families of valid inequalities on the
+out-flow of a customer set `S`:
+
+* rounded capacity cuts `x(δ⁺(S)) ≥ ⌈q(S)/Q⌉`;
+* 2-path cuts `x(δ⁺(S)) ≥ 2` when no single vehicle can serve `S` inside
+  the time windows, decided by an exact TSPTW feasibility DP (`S` limited to
+  8 customers).
+
+Candidate sets are the connected components of the fractional support
+graph and sets grown greedily around each customer. Cuts are added with
+`add_user_cut(..., UseCut.purge)`, so CPLEX may drop them again; they are
+not needed for correctness, the time/load propagation already forbids
+sub-tours. Tests check that a hand-built fractional point is cut off, that
+integral solutions are never cut, that the optimum is unchanged with cuts
+on both formulations and that the callback does add cuts on random
+instances.
+
+Trade-off: any relaxation callback disables CPLEX's dynamic search, so on
+instances CPLEX already solves at the root the callback version can take
+more nodes. The cuts pay off when the LP bound of the compact model is
+weak (many small customers, tight capacity).
+
+### 5.2 Branch-and-price (`vrptw/branch_and_price.py`, `vrptw/pricing.py`)
+
+* **Master**: set partitioning over elementary routes plus the fleet
+  constraint, kept in a `cplex.Cplex` LP so columns are added
+  incrementally and duals are read after each solve. An artificial column
+  that covers every customer at a prohibitive cost keeps the LP feasible at
+  every node; if it is still basic when the LP is below the incumbent the
+  node is simply discarded.
+* **Pricing**: ESPPRC by label setting (reduced cost, time, load, visited
+  mask). Customers that can no longer be reached are added to the mask
+  (Feillet et al. 2004), which strengthens dominance considerably. Up to 20
+  negative columns are added per round. A test compares the best column
+  with an exhaustive enumeration of all feasible routes.
+* **Branching**: on the most fractional arc flow. "Forbid" removes the arc
+  from the pricing graph; "force" removes all competing arcs. Columns
+  incompatible with a node get an upper bound of 0 there, so no column is
+  ever deleted. Nodes are explored best-bound first; pruning uses the fact
+  that all costs are multiples of 0.1.
+* **Scope**: distance objective only (the lexicographic objective would
+  need a vehicle-count term with a large weight). The pricing is pure
+  Python; for Solomon's 100-customer instances one would add ng-route or
+  DSSR relaxations, bidirectional labelling and dual stabilisation.
+
+Tests cover the sample, relaxed windows, infeasibility, eight random
+7-customer instances against brute force, and a 12-customer instance
+against the two-index MIP.
+
+## 6. Remaining ideas
+
+* Subset-row cuts in the branch-and-price master (Jepsen et al. 2008): the
+  largest single improvement in modern VRPTW branch-price-and-cut, at the
+  price of a more complex pricing problem.
+* ng-route relaxation and bidirectional labelling for the pricing problem.
+* A heterogeneous-fleet variant of the three-index model (different
+  capacities and costs per vehicle) is a small change to `VRPTW.mod` and
+  `_three_index`.

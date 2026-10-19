@@ -49,6 +49,23 @@ class TestCli(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertIn("Total distance: 156.2", out)
 
+    def test_branch_and_price_and_cuts(self):
+        try:
+            import cplex  # noqa: F401
+        except ImportError:  # pragma: no cover
+            self.skipTest("cplex not installed")
+        code, out, _ = run("solve", SAMPLE_DAT, "--method", "branch-and-price")
+        self.assertEqual(code, 0)
+        self.assertIn("Total distance: 156.2", out)
+        self.assertIn("status=optimal", out)
+        code, out, _ = run("solve", SAMPLE_DAT, "--cuts", "--objective", "lex")
+        self.assertEqual(code, 0)
+        self.assertIn("Total distance: 156.2", out)
+        self.assertIn("cuts=", out)
+        code, _, err = run("solve", SAMPLE_DAT, "--method", "branch-and-price", "--objective", "lex")
+        self.assertEqual(code, 2)
+        self.assertIn("only --objective distance", err)
+
     def test_convert(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "r101_5.dat"

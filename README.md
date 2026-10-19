@@ -18,7 +18,7 @@ capacity, while minimising the total distance travelled.
 | `VRPTW2.mod` | Two-index MIP with a sparse arc set and MTZ load variables: `v` times fewer variables, no vehicle symmetry. Recommended for identical vehicles. Minimises vehicles first, then distance. |
 | `VRPTW_CP.mod` | CP Optimizer model (interval and sequence variables). Finds good solutions on instances far too large for the MIPs. Not covered by the test-suite, see the note in the file. |
 | `VRPTW.dat` | Sample instance: the depot and the first five customers of Solomon's R101. |
-| `vrptw/` | Python package: `.dat`/Solomon readers, time-window tightening, a construction heuristic, docplex ports of both MIPs (with warm start and lexicographic objective), a feasibility checker and a brute-force reference solver. |
+| `vrptw/` | Python package: `.dat`/Solomon readers, time-window tightening, a construction heuristic, docplex ports of both MIPs (warm start, lexicographic objective, callback-separated cuts), a branch-and-price solver, a feasibility checker and a brute-force reference solver. |
 | `tests/` | `unittest` suite covering the data, the checker, the CLI and the model (solved with CPLEX). |
 | `docs/REVIEW.md` | Review of the original model, the fixes made and suggestions for further improvements. |
 | `.oplproject`, `.project` | CPLEX Optimization Studio IDE project files. |
@@ -77,6 +77,8 @@ python -m vrptw solve VRPTW.dat                         # two-index MIP with CPL
 python -m vrptw solve VRPTW.dat --formulation three-index
 python -m vrptw solve VRPTW.dat --objective lex         # fewest vehicles first, then distance
 python -m vrptw solve VRPTW.dat --time-limit 60 --mip-gap 0.01
+python -m vrptw solve VRPTW.dat --cuts                  # branch-and-cut: capacity and 2-path cuts in a callback
+python -m vrptw solve VRPTW.dat --method branch-and-price
 python -m vrptw solve VRPTW.dat --heuristic             # construction heuristic only, no CPLEX
 python -m vrptw solve VRPTW.dat --brute-force           # exhaustive reference solver (tiny instances)
 python -m vrptw convert R101.txt -o R101_25.dat --customers 25   # Solomon file -> .dat
@@ -86,6 +88,22 @@ python -m vrptw convert R101.txt -o R101_25.dat --customers 25   # Solomon file 
 per-arc big-M, adds the capacity cut, warm-starts CPLEX with the heuristic
 solution and verifies the returned routes with the independent checker.
 Each step can be switched off (`--no-preprocess`, `--no-warm-start`).
+A `Statistics:` line reports nodes, time, gap and the number of cuts or
+columns generated.
+
+### Exact methods
+
+| Method | Where | Best for |
+| --- | --- | --- |
+| Three-index MIP | `VRPTW.mod`, `--formulation three-index` | Small instances, heterogeneous fleets. |
+| Two-index MIP | `VRPTW2.mod`, `--formulation two-index` (default) | Up to roughly 20–25 customers. |
+| Branch-and-cut | `--cuts` | Same model with rounded capacity cuts and 2-path cuts separated on the LP relaxation in a CPLEX generic callback (`vrptw/cuts.py`). Strengthens the bound; note that any relaxation callback makes CPLEX fall back from dynamic search to traditional branch-and-bound. |
+| Branch-and-price | `--method branch-and-price` | Set-partitioning master with ESPPRC pricing (`vrptw/branch_and_price.py`, `vrptw/pricing.py`); the LP bound is much tighter than the arc formulations', so it scales to larger instances with tight windows. Distance objective only. |
+
+On random instances with 12, 15 and 20 customers all three exact methods
+return the same optimum; the branch-and-price root bound was within 1.5 %
+of the optimum on the 20-customer instance and within 6 % on the
+15-customer one.
 
 `vrptw` is also installed as a console script by `pip install -e .`.
 From Python:
@@ -148,6 +166,25 @@ u_i + q_j - Q (1 - x_ij) ≤ u_j                 ∀ (i,j) ∈ A, i,j ∈ C (loa
 
 On the sample instance the two-index model has 30 variables and 38
 constraints against 130 and 145 for the three-index model.
+
+### Branch-and-price (`vrptw/branch_and_price.py`)
+
+The set-partitioning master selects routes `r` with cost `c_r`:
+
+```
+min  Σ_r c_r λ_r
+Σ_r a_ir λ_r = 1      ∀ i ∈ C      (every customer on exactly one route)
+Σ_r λ_r ≤ v                        (fleet)
+λ_r ≥ 0
+```
+
+Columns are priced by an elementary shortest path problem with resource
+constraints (time and load), solved by label setting with the
+"unreachable customers" dominance rule. Branching is on arc flows
+`x_ij = Σ_r a_ijr λ_r` (forbid the arc, or force it by forbidding all its
+competitors), which keeps the pricing problem unchanged in structure. An
+artificial column keeps every node's LP feasible.
+
 `docs/REVIEW.md` explains the choices and lists alternatives.
 
 ## Data format

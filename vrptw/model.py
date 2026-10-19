@@ -171,6 +171,15 @@ def _follow(inst: Instance, succ: dict[int, int], node: int) -> Route:
     return tuple(route)
 
 
+def arc_variables(built: BuiltModel) -> dict[tuple[int, int], list[Any]]:
+    """Group the arc variables by arc (summing over vehicles in the three-index model)."""
+    grouped: dict[tuple[int, int], list[Any]] = {}
+    for key, var in built.x.items():
+        i, j = key[-2], key[-1]
+        grouped.setdefault((i, j), []).append(var)
+    return grouped
+
+
 def add_warm_start(built: BuiltModel, solution: Solution) -> None:
     """Pass a feasible solution to CPLEX as a MIP start."""
     inst = built.instance
@@ -211,12 +220,17 @@ def solve(
     warm_start: bool = True,
     symmetry_breaking: bool = True,
     capacity_cut: bool = True,
+    cuts: bool = False,
     log_output: bool = False,
+    stats: dict | None = None,
 ) -> Solution | None:
     """Solve ``inst``. Returns ``None`` when the instance is infeasible.
 
-    The returned distance is recomputed from the routes on the original
-    instance, so it is exact regardless of preprocessing and objective.
+    With ``cuts=True`` rounded capacity cuts and 2-path cuts are separated
+    in a CPLEX callback (see :mod:`vrptw.cuts`).  ``stats``, if given, is
+    filled with solve statistics (nodes, cuts, ...).  The returned distance is
+    recomputed from the routes on the original instance, so it is exact
+    regardless of preprocessing and objective.
     """
     work = tighten_time_windows(inst) if preprocess else inst
     built = build_model(work, formulation, objective, symmetry_breaking, capacity_cut)
@@ -228,7 +242,23 @@ def solve(
         heuristic = construct(work)
         if heuristic is not None:
             add_warm_start(built, heuristic)
+    callback = None
+    if cuts:
+        from vrptw.cuts import install
+
+        callback = install(built.model, work, arc_variables(built))
     sol = built.model.solve(log_output=log_output)
+    if stats is not None:
+        details = sol.solve_details if sol is not None else built.model.solve_details
+        nodes, gap = details.nb_nodes_processed, details.mip_relative_gap
+        stats.update(
+            status=details.status,
+            nodes=nodes if isinstance(nodes, int) else None,  # not reported for multi-objective solves
+            time=round(details.time, 3),
+            gap=gap if isinstance(gap, float) and gap < 1e6 else None,
+            cuts=callback.cuts_added if callback else 0,
+            callback_calls=callback.calls if callback else 0,
+        )
     if sol is None:
         return None
     routes = tuple(extract_routes(built, sol))

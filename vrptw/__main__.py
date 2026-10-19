@@ -30,10 +30,27 @@ def cmd_solve(args: argparse.Namespace) -> int:
     if problems:
         print("Invalid instance:", *problems, sep="\n  ", file=sys.stderr)
         return 2
+    stats: dict = {}
     if args.brute_force:
         solution = brute_force(inst, objective=args.objective)
     elif args.heuristic:
         solution = construct(inst)
+    elif args.method == "branch-and-price":
+        from vrptw.branch_and_price import branch_and_price
+
+        if args.objective != "distance":
+            print("branch-and-price supports only --objective distance", file=sys.stderr)
+            return 2
+        result = branch_and_price(inst, time_limit=args.time_limit, preprocess=not args.no_preprocess, log=args.verbose)
+        solution = result.solution
+        stats = dict(
+            status=result.status,
+            nodes=result.nodes,
+            columns=result.columns,
+            pricing_rounds=result.pricing_rounds,
+            root_bound=result.root_bound,
+            lower_bound=result.lower_bound,
+        )
     else:
         from vrptw.model import solve
 
@@ -45,7 +62,9 @@ def cmd_solve(args: argparse.Namespace) -> int:
             mip_gap=args.mip_gap,
             preprocess=not args.no_preprocess,
             warm_start=not args.no_warm_start,
+            cuts=args.cuts,
             log_output=args.verbose,
+            stats=stats,
         )
     if solution is None:
         print("No feasible solution.", file=sys.stderr)
@@ -55,6 +74,10 @@ def cmd_solve(args: argparse.Namespace) -> int:
         print("Solver returned an infeasible solution:", *violations, sep="\n  ", file=sys.stderr)
         return 3
     _print_solution(inst, solution)
+    if stats:
+        print(
+            "Statistics: " + ", ".join(f"{k}={v:.1f}" if isinstance(v, float) else f"{k}={v}" for k, v in stats.items())
+        )
     return 0
 
 
@@ -81,7 +104,14 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("solve", help="solve a .dat instance with CPLEX (docplex)")
     p.add_argument("dat")
+    p.add_argument(
+        "--method",
+        choices=["mip", "branch-and-price"],
+        default="mip",
+        help="compact MIP (default) or set-partitioning branch-and-price",
+    )
     p.add_argument("--formulation", choices=["three-index", "two-index"], default="two-index")
+    p.add_argument("--cuts", action="store_true", help="separate capacity and 2-path cuts in a callback (MIP only)")
     p.add_argument(
         "--objective",
         choices=["distance", "lex"],
