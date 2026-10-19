@@ -1,3 +1,7 @@
+// Sample instance: the depot and the first five customers of Solomon's R101.
+// Node 0 is the depot, nodes 1..CustomersNumber are customers and node
+// CustomersNumber + 1 is a copy of the depot where every route ends.
+
 v = 5;
 CustomersNumber = 5;
 Capacity = 200;
@@ -17,7 +21,7 @@ ServiceTime = #[
 	3: 10,
 	4: 10,
 	5: 10,
-	6: 10
+	6: 0
 ]#;
 
 XCoord = #[
@@ -27,7 +31,7 @@ XCoord = #[
 	3: 55,
 	4: 55,
 	5: 15,
-	6: 65
+	6: 35
 ]#;
 
 YCoord = #[
@@ -37,25 +41,27 @@ YCoord = #[
 	3: 45,
 	4: 20,
 	5: 30,
-	6: 20
+	6: 35
 ]#;
 
+// Lower bound of each time window (earliest start of service)
 LBTW = #[
 	0: 0,
-	1: 0,
-	2: 0,
-	3: 0,
-	4: 0,
-	5: 0,
+	1: 161,
+	2: 50,
+	3: 116,
+	4: 149,
+	5: 34,
 	6: 0
 ]#;
 
+// Upper bound of each time window (latest start of service)
 UBTW = #[
-	0: 200,
-	1: 200,
-	2: 200,
-	3: 200,
-	4: 200,
-	5: 200,
-	6: 200
+	0: 230,
+	1: 171,
+	2: 60,
+	3: 126,
+	4: 159,
+	5: 44,
+	6: 230
 ]#;

@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cplex-vrptw"
+version = "1.0.0"
+description = "Vehicle Routing Problem with Time Windows (VRPTW) in OPL/CPLEX, with a docplex port and tooling"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Alexandru Furculita" }]
+keywords = ["vrptw", "vehicle routing", "cplex", "opl", "docplex", "optimization"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+dependencies = []
+
+[project.optional-dependencies]
+# CPLEX 22.2 Community Edition from PyPI (1000 variables/constraints), enough
+# for the sample instance and the tests. A full CPLEX installation works too.
+solver = ["cplex>=22.1.2", "docplex>=2.32"]
+
+[project.scripts]
+vrptw = "vrptw.__main__:main"
+
+[project.urls]
+Repository = "https://github.com/afurculita/cplex-vrptw-implementation"
+
+[tool.setuptools]
+packages = ["vrptw"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
