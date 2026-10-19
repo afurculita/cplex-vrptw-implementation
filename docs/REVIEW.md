@@ -96,50 +96,58 @@ at every stop, and marks idle vehicles.
 | Python | 3.10–3.14 |
 | GitHub Actions | `actions/checkout@v7`, `actions/setup-python@v7` |
 
-## 4. Suggestions not applied
+## 4. Further improvements applied
 
-These are worth considering depending on where the project goes; each one
-changes the model's scope or its readability trade-offs, so they are left as
-suggestions.
+The suggestions below were implemented after the review (in both the OPL
+models and the Python port unless stated otherwise).
 
-1. **Sparse arc set in OPL.** Declaring `tuple Arc {int i; int j;}`, a set
-   `Arcs = {<i,j> | i,j in Nodes : Allowed[i][j] == 1}` and
-   `dvar boolean x[Vehicles][Arcs]` avoids creating the forbidden variables at
-   all instead of fixing them to zero. CPLEX presolve removes the fixed
-   variables anyway, so the solve is the same, but the generated model is
-   smaller and tighter time windows prune more. The dense form was kept
-   because it is easier to read; the Python port already uses the sparse form.
-2. **Two-index formulation.** With identical vehicles the vehicle index is
-   unnecessary: use `x[i][j]`, `s[i]` and a load variable `u[i]` with
-   Miller–Tucker–Zemlin style capacity propagation
-   (`u_i + q_j - Q(1 - x_ij) ≤ u_j`). This divides the number of variables by
-   `v`, removes the vehicle symmetry entirely and is the formulation of
-   choice for anything beyond a few customers. The three-index form was kept
-   because it is the one the repository documents and it supports
-   heterogeneous fleets.
-3. **Hierarchical objective.** The Solomon benchmark convention minimises the
-   number of vehicles first and the distance second. In OPL this is
-   `minimize staticLex(VehiclesUsed, TotalDistance);` (both `dexpr`s already
-   exist), or a weighted sum `BigWeight * VehiclesUsed + TotalDistance`.
-4. **CP Optimizer model.** For larger instances or richer side constraints
-   (multiple time windows, driver breaks, precedence) a CP Optimizer model
-   with interval variables, one `sequence` per vehicle, `noOverlap` with a
-   transition-distance matrix and `endBeforeStart` constraints usually finds
-   good solutions much faster than the MIP, at the cost of weaker optimality
-   proofs. OPL supports both engines in the same project.
-5. **Exact methods for benchmark sizes.** The compact MIP solves instances of
-   roughly 15–25 customers. Solomon's 100-customer instances require
-   branch-and-price (set-partitioning master problem, elementary shortest
-   path pricing with resource constraints); docplex is a reasonable base for
-   the master problem.
-6. **Valid inequalities and preprocessing.** Time window tightening
-   (`a_i := max(a_i, a_0 + t_0i)`, `b_i := min(b_i, b_{n+1} - t_i,n+1)`),
-   two-path cuts and the capacity cut `Σ_j x_k0j ≥ ⌈Σ q_i / Q⌉` strengthen
-   the LP bound considerably.
-7. **Warm start.** A sweep or nearest-neighbour heuristic provides a feasible
-   incumbent; passing it to CPLEX (`cplex.addMIPStart` in OPL script,
-   `Model.add_mip_start` in docplex) prunes the tree early.
-8. **Solver settings.** For the MIP, `cplex.tilim`, `cplex.epgap` and
-   `cplex.mipemphasis = 1` (feasibility) are the usual knobs; they can be set
-   in an `execute { }` block before the model or in the IDE run
-   configuration.
+1. **Two-index formulation** (`VRPTW2.mod`, `--formulation two-index`,
+   the Python default). Arc variables `x[i][j]` shared by all vehicles,
+   Miller–Tucker–Zemlin load variables for the capacity, time propagation
+   as before. `v` times fewer arc variables and no vehicle symmetry; on the
+   sample instance 30 variables / 38 constraints instead of 130 / 145.
+2. **Sparse arc set in OPL.** `VRPTW2.mod` declares `tuple Arc` and
+   `{Arc} Arcs` filtered by the time windows, so forbidden arcs never get a
+   variable. `VRPTW.mod` keeps the dense form (fixed to zero) for
+   readability.
+3. **Hierarchical objective.** `VRPTW2.mod` minimises
+   `staticLex(VehiclesUsed, TotalDistance)`; the Python port offers
+   `objective="lex"` through docplex's `minimize_static_lex`, and the
+   brute-force solver can compute the same lexicographic optimum for the
+   tests.
+4. **Time-window tightening** (`vrptw/preprocess.py`, `execute
+   TIGHTEN_TIME_WINDOWS` in both MIPs). Two necessary conditions are
+   iterated to a fixed point. Tests check the optimum is preserved on random
+   instances and that the reduction is idempotent.
+5. **Capacity cut** `VehiclesUsed >= ceil(total demand / Capacity)` in both
+   MIPs.
+6. **Warm start** (`vrptw/heuristic.py`). A time-oriented nearest-neighbour
+   construction followed by a relocate local search gives a feasible
+   incumbent that is passed to CPLEX with `add_mip_start`. In OPL the same
+   can be done with `cplex.addMIPStart` from a preprocessing script; it is
+   not included because the heuristic is far easier to write and test in
+   Python.
+7. **Solver settings.** `execute PARAMS` blocks set `cplex.tilim`,
+   `cplex.epgap`, `cplex.mipemphasis` and `cplex.threads` (CP: `TimeLimit`,
+   `Workers`); the CLI exposes `--time-limit` and `--mip-gap`.
+8. **CP Optimizer model** (`VRPTW_CP.mod`). Interval variables per visit,
+   optional per-vehicle copies linked with `alternative`, one `sequence` per
+   vehicle with `noOverlap` and a transition matrix of travel distances,
+   `first`/`last` for the depots, the distance computed with `typeOfNext`.
+   Times are scaled by 10 so they are integer. **Not executed here**: the
+   Community Edition on PyPI ships no CP Optimizer engine, so this model is
+   provided as a starting point and flagged as untested in its header.
+
+## 5. Suggestions not applied
+
+* **Branch-and-price.** Solomon's 100-customer instances need a
+  set-partitioning master problem with an elementary shortest path pricing
+  problem with resource constraints (ESPPRC). This is a project of its own
+  (labelling algorithm, column management, branching rules) and is out of
+  scope for a compact-model repository; the two-index model solves
+  instances of roughly 15–25 customers and the CP model gives good
+  heuristic solutions beyond that.
+* **Stronger cuts** (two-path cuts, k-path cuts, subtour-elimination cuts
+  separated in a callback) require a callback-driven branch-and-cut, which
+  OPL does not expose; they could be added in the docplex port with CPLEX's
+  generic callbacks.

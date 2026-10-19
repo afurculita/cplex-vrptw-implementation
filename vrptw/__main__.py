@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from vrptw.data import read_dat, read_solomon, write_dat
+from vrptw.heuristic import construct
 from vrptw.verify import brute_force, check_solution, route_schedule
 
 
@@ -30,11 +31,22 @@ def cmd_solve(args: argparse.Namespace) -> int:
         print("Invalid instance:", *problems, sep="\n  ", file=sys.stderr)
         return 2
     if args.brute_force:
-        solution = brute_force(inst)
+        solution = brute_force(inst, objective=args.objective)
+    elif args.heuristic:
+        solution = construct(inst)
     else:
         from vrptw.model import solve
 
-        solution = solve(inst, time_limit=args.time_limit, log_output=args.verbose)
+        solution = solve(
+            inst,
+            formulation=args.formulation,
+            objective=args.objective,
+            time_limit=args.time_limit,
+            mip_gap=args.mip_gap,
+            preprocess=not args.no_preprocess,
+            warm_start=not args.no_warm_start,
+            log_output=args.verbose,
+        )
     if solution is None:
         print("No feasible solution.", file=sys.stderr)
         return 1
@@ -69,8 +81,19 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("solve", help="solve a .dat instance with CPLEX (docplex)")
     p.add_argument("dat")
+    p.add_argument("--formulation", choices=["three-index", "two-index"], default="two-index")
+    p.add_argument(
+        "--objective",
+        choices=["distance", "lex"],
+        default="distance",
+        help="'lex' minimises the number of vehicles first, then the distance",
+    )
     p.add_argument("--time-limit", type=float, default=None, help="seconds")
+    p.add_argument("--mip-gap", type=float, default=None, help="relative MIP gap, e.g. 0.01")
+    p.add_argument("--no-preprocess", action="store_true", help="skip the time-window tightening")
+    p.add_argument("--no-warm-start", action="store_true", help="do not pass the heuristic solution to CPLEX")
     p.add_argument("--brute-force", action="store_true", help="use the exhaustive reference solver instead")
+    p.add_argument("--heuristic", action="store_true", help="only run the construction heuristic")
     p.add_argument("-v", "--verbose", action="store_true", help="show the CPLEX log")
     p.set_defaults(func=cmd_solve)
 

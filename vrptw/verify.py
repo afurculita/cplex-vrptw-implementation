@@ -74,13 +74,16 @@ def check_solution(inst: Instance, routes: list[Route] | tuple[Route, ...]) -> l
     return problems
 
 
-def brute_force(inst: Instance, max_customers: int = 8) -> Solution | None:
+def brute_force(inst: Instance, max_customers: int = 8, objective: str = "distance") -> Solution | None:
     """Exact solution by exhaustive enumeration, for small instances only.
 
     Every subset of customers is tried in every order to get the cheapest
     feasible single route; a set-partitioning DP then combines routes.
-    Returns ``None`` when no feasible solution exists.
+    ``objective`` is ``"distance"`` or ``"lex"`` (fewest vehicles, then
+    shortest distance).  Returns ``None`` when no feasible solution exists.
     """
+    if objective not in ("distance", "lex"):
+        raise ValueError(f"unknown objective {objective!r}")
     n = inst.n
     if n > max_customers:
         raise ValueError(f"brute force is limited to {max_customers} customers")
@@ -121,9 +124,11 @@ def brute_force(inst: Instance, max_customers: int = 8) -> Solution | None:
                         cur[new_mask] = (cost + rc, (*routes, r))
                 sub = (sub - 1) & remaining
         dp.append(cur)
-    candidates = [layer[full] for layer in dp if full in layer]
+    candidates = [(used, layer[full]) for used, layer in enumerate(dp) if full in layer]
     if not candidates:
         return None
-    cost, routes = min(candidates, key=lambda c: c[0])
+    if objective == "lex":
+        candidates = [min(candidates, key=lambda c: (c[0], c[1][0]))]
+    cost, routes = min(c[1] for c in candidates)
     padded = (*routes, *(() for _ in range(inst.vehicles - len(routes))))
     return Solution(routes=padded, distance=round(cost, 6))

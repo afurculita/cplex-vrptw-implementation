@@ -14,9 +14,11 @@ capacity, while minimising the total distance travelled.
 
 | Path | Purpose |
 | --- | --- |
-| `VRPTW.mod` | The OPL model (the reference implementation). |
+| `VRPTW.mod` | Three-index MIP (one arc variable per vehicle): the original formulation, reviewed and tightened. |
+| `VRPTW2.mod` | Two-index MIP with a sparse arc set and MTZ load variables: `v` times fewer variables, no vehicle symmetry. Recommended for identical vehicles. Minimises vehicles first, then distance. |
+| `VRPTW_CP.mod` | CP Optimizer model (interval and sequence variables). Finds good solutions on instances far too large for the MIPs. Not covered by the test-suite, see the note in the file. |
 | `VRPTW.dat` | Sample instance: the depot and the first five customers of Solomon's R101. |
-| `vrptw/` | Python package: `.dat`/Solomon readers, the docplex port of the model, a feasibility checker and a brute-force reference solver. |
+| `vrptw/` | Python package: `.dat`/Solomon readers, time-window tightening, a construction heuristic, docplex ports of both MIPs (with warm start and lexicographic objective), a feasibility checker and a brute-force reference solver. |
 | `tests/` | `unittest` suite covering the data, the checker, the CLI and the model (solved with CPLEX). |
 | `docs/REVIEW.md` | Review of the original model, the fixes made and suggestions for further improvements. |
 | `.oplproject`, `.project` | CPLEX Optimization Studio IDE project files. |
@@ -39,12 +41,18 @@ pip install -e ".[solver]"   # or: pip install cplex docplex
 
 ### OPL (CPLEX Optimization Studio)
 
-Open the project in the IDE and run the default configuration, or use the
-command line interface:
+Open the project in the IDE and pick one of the three run configurations
+(three-index MIP, two-index MIP, CP Optimizer), or use the command line:
 
 ```bash
-oplrun VRPTW.mod VRPTW.dat
+oplrun VRPTW.mod VRPTW.dat      # three-index MIP, minimises distance
+oplrun VRPTW2.mod VRPTW.dat     # two-index MIP, fewest vehicles then distance
+oplrun VRPTW_CP.mod VRPTW.dat   # CP Optimizer
 ```
+
+All three models read the same data, tighten the time windows in
+preprocessing and set a 600 s time limit in their `PARAMS` block (edit it
+there or override it in the IDE run configuration).
 
 Output of the sample instance:
 
@@ -64,11 +72,20 @@ the depot at the end of every route.
 ### Python
 
 ```bash
-python -m vrptw validate VRPTW.dat             # check the data for consistency
-python -m vrptw solve VRPTW.dat                # solve with CPLEX through docplex
-python -m vrptw solve VRPTW.dat --brute-force  # exhaustive reference solver (tiny instances)
+python -m vrptw validate VRPTW.dat                      # check the data for consistency
+python -m vrptw solve VRPTW.dat                         # two-index MIP with CPLEX (docplex)
+python -m vrptw solve VRPTW.dat --formulation three-index
+python -m vrptw solve VRPTW.dat --objective lex         # fewest vehicles first, then distance
+python -m vrptw solve VRPTW.dat --time-limit 60 --mip-gap 0.01
+python -m vrptw solve VRPTW.dat --heuristic             # construction heuristic only, no CPLEX
+python -m vrptw solve VRPTW.dat --brute-force           # exhaustive reference solver (tiny instances)
 python -m vrptw convert R101.txt -o R101_25.dat --customers 25   # Solomon file -> .dat
 ```
+
+`solve` tightens the time windows, builds the model with the tightest
+per-arc big-M, adds the capacity cut, warm-starts CPLEX with the heuristic
+solution and verifies the returned routes with the independent checker.
+Each step can be switched off (`--no-preprocess`, `--no-warm-start`).
 
 `vrptw` is also installed as a console script by `pip install -e .`.
 From Python:
@@ -79,11 +96,11 @@ from vrptw.model import solve
 
 inst = read_dat("VRPTW.dat")
 solution = solve(inst)
-print(solution.distance, solution.routes)   # 156.2 ((5, 3, 1), (2, 4), (), (), ())
+print(solution.distance, solution.routes)  # 156.2 ((5, 3, 1), (2, 4), (), (), ())
 assert check_solution(inst, solution.routes) == []
 ```
 
-## The formulation
+## The formulations
 
 Sets: vehicles `K = 1..v`, customers `C = 1..n`, nodes `N = 0..n+1` where `0` is
 the depot and `n+1` is a copy of it. Data: demand `q_i`, capacity `Q`, time
@@ -110,6 +127,27 @@ x_k,0,n+1 ≤ x_k+1,0,n+1                        ∀ k < v        (symmetry brea
 `A` is the set of usable arcs: no self loops, nothing enters node `0`, nothing
 leaves node `n+1`, and `a_i + t_ij ≤ b_j`. The time propagation constraints
 make sub-tours impossible, so no explicit sub-tour elimination is needed.
+Both MIPs add the capacity cut `Σ_j x_0j ≥ ⌈Σ q_i / Q⌉` and first tighten the
+windows with `a_j := max(a_j, min_i(a_i + t_ij))`,
+`b_j := min(b_j, max_k(b_k - t_jk))` (Desrochers, Desrosiers & Solomon 1992).
+
+### Two-index formulation (`VRPTW2.mod`)
+
+For identical vehicles the vehicle index is unnecessary. `x_ij ∈ {0,1}` says
+whether some vehicle uses arc `(i, j)`, `s_i` is the start of service and
+`u_i ∈ [q_i, Q]` the load of the vehicle after serving customer `i`:
+
+```
+lexmin ( Σ_j x_0j ,  Σ_ij d_ij x_ij )
+
+Σ_i x_ij = 1,  Σ_j x_ij = 1                    ∀ i ∈ C        (degree)
+Σ_j x_0j ≤ v                                   (fleet size)
+s_i + t_ij - M_ij (1 - x_ij) ≤ s_j             ∀ (i,j) ∈ A    (time propagation)
+u_i + q_j - Q (1 - x_ij) ≤ u_j                 ∀ (i,j) ∈ A, i,j ∈ C (load propagation)
+```
+
+On the sample instance the two-index model has 30 variables and 38
+constraints against 130 and 145 for the three-index model.
 `docs/REVIEW.md` explains the choices and lists alternatives.
 
 ## Data format

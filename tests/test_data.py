@@ -43,18 +43,16 @@ class TestSampleData(unittest.TestCase):
         r101 = read_solomon(FIXTURES / "R101_head.txt", customers=5, vehicles=5)
         self.assertEqual(r101, self.inst)
 
-    def test_every_dat_parameter_is_declared_in_the_model(self):
+    def test_every_dat_parameter_is_declared_in_each_model(self):
         import re
 
-        declared = set(
-            re.findall(
-                r"^\s*(?:int|float)\s+(\w+)(?:\[[^\]]*\])?\s*=\s*\.\.\.;",
-                (SAMPLE_DAT.parent / "VRPTW.mod").read_text(),
-                re.M,
-            )
-        )
         provided = set(parse_dat(SAMPLE_DAT.read_text()))
-        self.assertEqual(declared, provided)
+        for mod in sorted(SAMPLE_DAT.parent.glob("*.mod")):
+            with self.subTest(model=mod.name):
+                declared = set(
+                    re.findall(r"^\s*(?:int|float)\s+(\w+)(?:\[[^\]]*\])?\s*=\s*\.\.\.;", mod.read_text(), re.M)
+                )
+                self.assertEqual(declared, provided)
 
 
 class TestDistances(unittest.TestCase):

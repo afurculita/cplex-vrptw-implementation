@@ -11,7 +11,9 @@
  * duplicated as node CustomersNumber + 1 so every route is a path from
  * node 0 to node CustomersNumber + 1.  The objective is the total distance.
  *
- * Tested with IBM ILOG CPLEX Optimization Studio 22.2.
+ * Written for IBM ILOG CPLEX Optimization Studio 22.2.  See VRPTW2.mod for
+ * the two-index formulation (recommended for identical vehicles) and
+ * VRPTW_CP.mod for a CP Optimizer model.
  *
  *****************************************************************************/
 
@@ -47,13 +49,59 @@ float Distance[i in Nodes][j in Nodes] =
 // Time needed to go from i to j: service at i, then travel.
 float Time[i in Nodes][j in Nodes] = Distance[i][j] + ServiceTime[i];
 
+// Time windows tightened in preprocessing (Desrochers, Desrosiers & Solomon
+// 1992).  Every route feasible for [LBTW, UBTW] is feasible for [Ready, Due],
+// so the optimum is unchanged, but more arcs are pruned and every big-M is
+// smaller.  Two necessary conditions are iterated to a fixed point:
+//   Ready[j] >= min over predecessors i of Ready[i] + Time[i][j]
+//   Due[j]   <= max over successors  k of Due[k]   - Time[j][k]
+float Ready[Nodes];
+float Due[Nodes];
+execute TIGHTEN_TIME_WINDOWS {
+  for (var i in Nodes) {
+    Ready[i] = LBTW[i];
+    Due[i] = UBTW[i];
+  }
+  var changed = true;
+  var rounds = 0;
+  while (changed && rounds < 100) {
+    changed = false;
+    rounds = rounds + 1;
+    for (var j in Customers) {
+      var earliest = Infinity;
+      for (var i in Nodes) {
+        if (i != j && i != EndDepot && Ready[i] + Time[i][j] <= Due[j]) {
+          earliest = Math.min(earliest, Ready[i] + Time[i][j]);
+        }
+      }
+      if (earliest != Infinity && earliest > Ready[j] + 1e-9) {
+        Ready[j] = earliest;
+        changed = true;
+      }
+      var latest = -Infinity;
+      for (var k in Nodes) {
+        if (k != j && k != Depot && Ready[j] + Time[j][k] <= Due[k]) {
+          latest = Math.max(latest, Due[k] - Time[j][k]);
+        }
+      }
+      if (latest != -Infinity && latest < Due[j] - 1e-9) {
+        Due[j] = latest;
+        changed = true;
+      }
+    }
+  }
+}
+
 // Arcs that can never be part of a route: self loops, arcs into the start
 // depot, arcs out of the end depot and arcs incompatible with the time windows.
 int Allowed[i in Nodes][j in Nodes] =
-  (i != j && j != Depot && i != EndDepot && LBTW[i] + Time[i][j] <= UBTW[j]) ? 1 : 0;
+  (i != j && j != Depot && i != EndDepot && Ready[i] + Time[i][j] <= Due[j]) ? 1 : 0;
 
 // Tightest valid big-M for the time propagation constraint of each arc.
-float BigM[i in Nodes][j in Nodes] = maxl(0, UBTW[i] + Time[i][j] - LBTW[j]);
+float BigM[i in Nodes][j in Nodes] = maxl(0, Due[i] + Time[i][j] - Ready[j]);
+
+// Lower bound on the number of vehicles needed (capacity cut).
+float TotalDemand = sum(i in Customers) Demand[i];
 
 /*****************************************************************************
  * DECISION VARIABLES
@@ -63,15 +111,29 @@ float BigM[i in Nodes][j in Nodes] = maxl(0, UBTW[i] + Time[i][j] - LBTW[j]);
 dvar boolean x[Vehicles][Nodes][Nodes];
 
 // s[k][i] = time at which vehicle k starts servicing node i (bounded by the window)
-dvar float s[k in Vehicles][i in Nodes] in LBTW[i]..UBTW[i];
+dvar float s[k in Vehicles][i in Nodes] in Ready[i]..Due[i];
 
 dexpr float TotalDistance = sum(k in Vehicles, i, j in Nodes) Distance[i][j] * x[k][i][j];
 dexpr int   VehiclesUsed  = sum(k in Vehicles, j in Customers) x[k][Depot][j];
 
 /*****************************************************************************
+ * SOLVER SETTINGS
+ *****************************************************************************/
+
+execute PARAMS {
+  cplex.tilim = 600;        // time limit in seconds
+  cplex.epgap = 1e-4;       // relative MIP gap (CPLEX default)
+  cplex.mipemphasis = 0;    // 0 balanced, 1 feasibility, 2 optimality, 3 best bound
+  cplex.threads = 0;        // 0 = automatic
+}
+
+/*****************************************************************************
  * MODEL
  *****************************************************************************/
 
+// Total distance.  For the Solomon benchmark convention (fewest vehicles
+// first, then shortest distance) use instead:
+//   minimize staticLex(VehiclesUsed, TotalDistance);
 minimize TotalDistance;
 
 subject to {
@@ -106,6 +168,10 @@ subject to {
   forall(k in Vehicles)
     ctReturnToDepot:
       sum(i in Nodes) x[k][i][EndDepot] == 1;
+
+  // Capacity cut: at least ceil(total demand / capacity) vehicles are needed
+  ctMinVehicles:
+    VehiclesUsed >= ceil(TotalDemand / Capacity);
 
   // Time propagation: if vehicle k goes from i to j, service at j cannot
   // start before service at i has finished and the vehicle has travelled.
